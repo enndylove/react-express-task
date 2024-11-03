@@ -1,31 +1,38 @@
 const express = require("express");
-const app = express();
 const bodyParser = require("body-parser");
 const cors = require("cors");
+const { Pool } = require("pg");
+require("dotenv").config();
 
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
-
-
+const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
+const pool = new Pool({
+    user: process.env.DB_USER,
+    host: process.env.DB_HOST || 'localhost',
+    database: process.env.DB_DATABASE_NAME,
+    password: process.env.DB_PASSWORD,
+    port: process.env.DB_PORT || 5432,
+});
+
 app.get("/orders", async (req, res) => {
     try {
-        const clients = await prisma.client.findMany({
-            include: { orders: true },
-        });
-        res.json(clients);
+        const result = await pool.query(`
+            SELECT c.*, o.*
+            FROM clients c
+            LEFT JOIN Orders o ON c.id = o.client_id
+        `);
+        res.json(result.rows);
     } catch (error) {
-        console.error(error)
+        console.error(error);
         res.status(500).json({ error: "Failed to retrieve orders" });
     }
 });
 
-
 app.post('/orders', async (req, res) => {
     try {
-        console.log('Received request data:', req.body); // Логування запиту
+        console.log('Received request data:', req.body); // Log request data
         const { clientId, clientName, orderName } = req.body;
 
         if (!orderName || (!clientId && !clientName)) {
@@ -35,21 +42,19 @@ app.post('/orders', async (req, res) => {
         let client;
 
         if (clientId) {
-            client = await prisma.client.findUnique({
-                where: { id: parseInt(clientId) },
-            });
+            const clientResult = await pool.query('SELECT * FROM clients WHERE id = $1', [parseInt(clientId)]);
+            client = clientResult.rows[0];
+
+            if (!client) {
+                return res.status(404).json({ error: 'Client not found.' });
+            }
         } else {
-            client = await prisma.client.create({
-                data: { name: clientName },
-            });
+            const clientResult = await pool.query('INSERT INTO clients(name) VALUES($1) RETURNING *', [clientName]);
+            client = clientResult.rows[0];
         }
 
-        const order = await prisma.order.create({
-            data: {
-                name: orderName,
-                clientId: client.id,
-            },
-        });
+        const orderResult = await pool.query('INSERT INTO orders(name, client_id) VALUES($1, $2) RETURNING *', [orderName, client.id]);
+        const order = orderResult.rows[0];
 
         res.status(201).json({ client, order });
     } catch (error) {
