@@ -17,23 +17,44 @@ app.get("/orders", async (req, res) => {
         });
         res.json(clients);
     } catch (error) {
+        console.error(error)
         res.status(500).json({ error: "Failed to retrieve orders" });
     }
 });
 
 
-app.post("/orders", async (req, res) => {
-    const { clientName, orderName } = req.body;
+app.post('/orders', async (req, res) => {
     try {
-        const client = await prisma.client.create({
+        console.log('Received request data:', req.body); // Логування запиту
+        const { clientId, clientName, orderName } = req.body;
+
+        if (!orderName || (!clientId && !clientName)) {
+            return res.status(400).json({ error: 'Order name and client information are required.' });
+        }
+
+        let client;
+
+        if (clientId) {
+            client = await prisma.client.findUnique({
+                where: { id: parseInt(clientId) },
+            });
+        } else {
+            client = await prisma.client.create({
+                data: { name: clientName },
+            });
+        }
+
+        const order = await prisma.order.create({
             data: {
-                name: clientName,
-                orders: { create: [{ name: orderName }] },
+                name: orderName,
+                clientId: client.id,
             },
         });
-        res.status(201).json(client);
+
+        res.status(201).json({ client, order });
     } catch (error) {
-        res.status(500).json({ error: "Failed to create order" });
+        console.error('Error in POST /orders:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
     }
 });
 
